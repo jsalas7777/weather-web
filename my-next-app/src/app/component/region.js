@@ -79,62 +79,70 @@ const weatherCodeMap = {
   99: "Heavy thunderstorm + hail",
 };
 
-
-
 export default function Region({ useGPS = false }) {
-  const mapRef = useRef(null);
   const searchParams = useSearchParams();
-  const regionParam = searchParams.get('region') || 'US';
+  const regionParam = searchParams.get("region") || "US";
 
   const [current, setCurrent] = useState(null);
   const [forecast, setForecast] = useState([]);
   const [error, setError] = useState(null);
   const [center, setCenter] = useState(null);
-  const [locationName, setLocationName] = useState('Unknown Location');
+  const [locationName, setLocationName] = useState("Unknown Location");
 
   useEffect(() => {
     const fetchCoordinates = async () => {
+      setError(null);
       try {
-        
         if (useGPS && navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             async (pos) => {
               const lat = pos.coords.latitude;
               const lon = pos.coords.longitude;
               setCenter([lon, lat]);
-        
-              const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+
+              const res = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
+              );
               const data = await res.json();
-        
-              const city = data.address.city || data.address.town || data.address.village || data.address.county || 'Current Location';
+
+              const city =
+                data.address.city ||
+                data.address.town ||
+                data.address.village ||
+                data.address.county ||
+                "Current Location";
               setLocationName(city);
             },
             (err) => {
-              console.warn('GPS error:', err.message);
+              setError(
+                "Unable to access your location (GPS failed). Showing default region."
+              );
               fallbackToRegion();
             },
             { enableHighAccuracy: true, timeout: 10000 }
           );
-        }
-        
-        
-        else {
+        } else {
           fallbackToRegion();
         }
       } catch {
+        setError(
+          "Unable to access your location (GPS failed). Showing default region."
+        );
         fallbackToRegion();
       }
     };
 
     const fallbackToRegion = async () => {
-      const [countryCode, subCode] = regionParam.toUpperCase().split('-');
-      const isoName = countries.getName(countryCode, 'en');
+      const [countryCode, subCode] = regionParam.toUpperCase().split("-");
+      const isoName = countries.getName(countryCode, "en");
 
       if (subCode) {
         try {
           const query = `${subCode}, ${isoName}`;
           const res = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+              query
+            )}`
           );
           const data = await res.json();
           if (data.length > 0) {
@@ -142,7 +150,7 @@ export default function Region({ useGPS = false }) {
             setCenter([parseFloat(loc.lon), parseFloat(loc.lat)]);
             setLocationName(loc.display_name || `${subCode}, ${isoName}`);
           } else {
-            throw new Error('No data');
+            setError(`Failed to locate ${subCode} in ${isoName}`);
           }
         } catch {
           setError(`Failed to locate ${subCode} in ${isoName}`);
@@ -153,12 +161,13 @@ export default function Region({ useGPS = false }) {
           setCenter([match.latlng[1], match.latlng[0]]);
           setLocationName(isoName);
         } else {
-          setError('Country not found');
+          setError("Country not found");
         }
       }
     };
 
     fetchCoordinates();
+    // eslint-disable-next-line
   }, [regionParam, useGPS]);
 
   useEffect(() => {
@@ -173,7 +182,7 @@ export default function Region({ useGPS = false }) {
         setCurrent(data.current);
         const daily = data.daily.time.map((time, i) => ({
           date: new Date(time).toLocaleDateString(undefined, {
-            weekday: 'short',
+            weekday: "short",
           }),
           max: data.daily.temperature_2m_max[i],
           min: data.daily.temperature_2m_min[i],
@@ -181,19 +190,31 @@ export default function Region({ useGPS = false }) {
         }));
         setForecast(daily);
       })
-      .catch(() => setError('Failed to load weather'));
+      .catch(() => setError("Failed to load weather"));
   }, [center]);
 
   return (
     <div className="p-8 font-sans text-gray-900 dark:text-gray-100">
       <h1 className="text-2xl font-bold mb-4">📍 {locationName}</h1>
-      {error && <p className="text-red-500">{error}</p>}
+      {/* Error Message */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-800 rounded border border-red-400">
+          {error}
+        </div>
+      )}
 
       {current && (
         <div className="space-y-1 mb-6">
-          <p><strong>🌡️ Temperature:</strong> {current.temperature_2m}°C</p>
-          <p><strong>☁️ Conditions:</strong> {weatherCodeMap[current.weathercode]}</p>
-          <p><strong>💨 Wind:</strong> {current.wind_speed_10m} km/h</p>
+          <p>
+            <strong>🌡️ Temperature:</strong> {current.temperature_2m}°C
+          </p>
+          <p>
+            <strong>☁️ Conditions:</strong>{" "}
+            {weatherCodeMap[current.weathercode]}
+          </p>
+          <p>
+            <strong>💨 Wind:</strong> {current.wind_speed_10m} km/h
+          </p>
         </div>
       )}
 
@@ -202,7 +223,10 @@ export default function Region({ useGPS = false }) {
           <h2 className="text-xl font-semibold mb-2">7-Day Forecast</h2>
           <div className="flex overflow-x-auto gap-4 pb-4">
             {forecast.map((day, i) => (
-              <div key={i} className="min-w-[140px] border rounded-md p-4 text-center bg-white dark:bg-neutral-800 border-gray-300 dark:border-neutral-700">
+              <div
+                key={i}
+                className="min-w-[140px] border rounded-md p-4 text-center bg-white dark:bg-neutral-800 border-gray-300 dark:border-neutral-700"
+              >
                 <img
                   src={`/weather/animated/${weatherCodeToIcon[day.weathercode]}`}
                   alt={weatherCodeMap[day.weathercode]}
@@ -216,30 +240,44 @@ export default function Region({ useGPS = false }) {
             ))}
           </div>
 
-          <h3 className="text-lg font-medium mt-4 mb-2">📈 Temperature Chart</h3>
+          <h3 className="text-lg font-medium mt-4 mb-2">
+            📈 Temperature Chart
+          </h3>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={forecast}>
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'var(--tooltip-bg)',
-                  border: '1px solid var(--tooltip-border)',
-                  color: 'var(--tooltip-text)',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.875rem',
+                  backgroundColor: "var(--tooltip-bg)",
+                  border: "1px solid var(--tooltip-border)",
+                  color: "var(--tooltip-text)",
+                  borderRadius: "0.375rem",
+                  fontSize: "0.875rem",
                 }}
-                labelStyle={{ color: 'var(--tooltip-label)' }}
-                itemStyle={{ color: 'var(--tooltip-text)' }}
+                labelStyle={{ color: "var(--tooltip-label)" }}
+                itemStyle={{ color: "var(--tooltip-text)" }}
               />
-              <Line type="monotone" dataKey="max" stroke="#f87171" name="Max Temp" />
-              <Line type="monotone" dataKey="min" stroke="#60a5fa" name="Min Temp" />
+              <Line
+                type="monotone"
+                dataKey="max"
+                stroke="#f87171"
+                name="Max Temp"
+              />
+              <Line
+                type="monotone"
+                dataKey="min"
+                stroke="#60a5fa"
+                name="Min Temp"
+              />
             </LineChart>
           </ResponsiveContainer>
         </>
       )}
 
-      {!useGPS && regionParam.length === 2 && <Subregions country={regionParam.toUpperCase()} />}
+      {!useGPS && regionParam.length === 2 && (
+        <Subregions country={regionParam.toUpperCase()} />
+      )}
     </div>
   );
 }
