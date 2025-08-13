@@ -36,16 +36,16 @@ function vec3ToLatLon(vec) {
 function CountryBorders({ geoData, selectedIso }) {
   const radius = 1.51;
   const lineMaterial = new THREE.LineBasicMaterial({
-    color: "#85b6ff",
-    linewidth: 1.5,
-    transparent: true,
-    opacity: 0.7,
+    color: "#ffffff", // pure white
+    linewidth: 3,     // thicker lines (note: WebGL1 ignores linewidth > 1 on most platforms)
+    transparent: false,
+    opacity: 1,
   });
   const highlightMaterial = new THREE.LineBasicMaterial({
-    color: "#1976d2",
-    linewidth: 3,
-    transparent: true,
-    opacity: 0.95,
+    color: "#ffffff", // pure white
+    linewidth: 5,     // even thicker for selected country
+    transparent: false,
+    opacity: 1,
   });
 
   return (
@@ -81,6 +81,7 @@ function CountryBorders({ geoData, selectedIso }) {
   );
 }
 
+
 // ---- Click marker ----
 function ClickCircle({ position }) {
   const meshRef = useRef();
@@ -114,60 +115,104 @@ function ClickCircle({ position }) {
 }
 
 // ---- Clickable Sphere ----
-function ClickableSphere({ geoData, onSelect }) {
+function ClickableSphere({ geoData, onSelect, isDraggingRef }) {
   const meshRef = useRef();
-  const { camera, gl } = useThree();
+  const { camera } = useThree();
 
-  useEffect(() => {
-    function handlePointerDown(event) {
-      const rect = gl.domElement.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      const mouse = new THREE.Vector2(x, y);
+  // Track a simple gesture state
+  const gestureRef = useRef({
+    down: false,
+    startX: 0,
+    startY: 0,
+    moved: false,
+    startedOnGlobe: false,
+  });
 
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObject(meshRef.current);
-      if (intersects.length > 0) {
-        const point = intersects[0].point;
-        const [lat, lon] = vec3ToLatLon(point);
+  const MOVE_THRESHOLD_PX = 6;
 
-        if (geoData) {
-          const found = geoData.features.find((feature) =>
-            d3.geoContains(feature, [lon, lat])
-          );
-          if (found) {
-            const countryName = found.properties.name;
-            const countryIso = found.properties.id || found.properties.ISO_A3;
-            onSelect({ iso: countryIso, name: countryName }, [lat, lon], point);
-          } else {
-            onSelect(null, [lat, lon], point);
-          }
-        }
+  const handlePointerDown = (e) => {
+    // Do NOT stopPropagation; let OrbitControls receive the event too
+    gestureRef.current.down = true;
+    gestureRef.current.startX = e.clientX;
+    gestureRef.current.startY = e.clientY;
+    gestureRef.current.moved = false;
+    gestureRef.current.startedOnGlobe = true; // we're on the sphere mesh
+  };
+
+  const handlePointerMove = (e) => {
+    if (!gestureRef.current.down) return;
+    const dx = e.clientX - gestureRef.current.startX;
+    const dy = e.clientY - gestureRef.current.startY;
+    if (Math.hypot(dx, dy) > MOVE_THRESHOLD_PX) {
+      gestureRef.current.moved = true;
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    const { down, moved, startedOnGlobe } = gestureRef.current;
+    gestureRef.current.down = false;
+
+    // Only treat as a click if it started on globe, didn't move, and controls aren't dragging
+    if (!down || !startedOnGlobe || moved || isDraggingRef?.current) return;
+
+    const point = e.point.clone(); // r3f gives you the intersection point in world space
+    const [lat, lon] = vec3ToLatLon(point);
+
+    if (geoData) {
+      const found = geoData.features.find((feature) =>
+        d3.geoContains(feature, [lon, lat])
+      );
+      if (found) {
+        const countryName = found.properties.name;
+        const countryIso = found.properties.id || found.properties.ISO_A3;
+        onSelect({ iso: countryIso, name: countryName }, [lat, lon], point);
+      } else {
+        onSelect(null, [lat, lon], point);
       }
     }
-    gl.domElement.addEventListener("pointerdown", handlePointerDown);
-    return () => {
-      gl.domElement.removeEventListener("pointerdown", handlePointerDown);
-    };
-  }, [camera, gl, geoData, onSelect]);
+  };
+
+  const handlePointerCancel = () => {
+    gestureRef.current.down = false;
+    gestureRef.current.moved = false;
+    gestureRef.current.startedOnGlobe = false;
+  };
 
   return (
-    <mesh ref={meshRef}>
+    <mesh
+      ref={meshRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+    >
       <sphereGeometry args={[1.5, 64, 64]} />
       <meshBasicMaterial color="white" transparent opacity={0} />
     </mesh>
   );
 }
 
+
+
 // ---- Animated Orbit Controls ----
-function AnimatedOrbitControls({ targetLatLon, animate, onAnimationEnd }) {
+function AnimatedOrbitControls({ targetLatLon, animate, onAnimationEnd, dragStateRef }) {
   const controls = useRef();
   const { camera } = useThree();
 
-  // Store target spherical coords
   const [animating, setAnimating] = useState(false);
   const targetRef = useRef({ lat: 0, lon: 0 });
+
+  useEffect(() => {
+    if (!controls.current) return;
+    const onStart = () => { if (dragStateRef) dragStateRef.current = true; };
+    const onEnd = () => { if (dragStateRef) dragStateRef.current = false; };
+    controls.current.addEventListener("start", onStart);
+    controls.current.addEventListener("end", onEnd);
+    return () => {
+      controls.current.removeEventListener("start", onStart);
+      controls.current.removeEventListener("end", onEnd);
+    };
+  }, [dragStateRef]);
 
   useEffect(() => {
     if (animate && targetLatLon) {
@@ -179,12 +224,8 @@ function AnimatedOrbitControls({ targetLatLon, animate, onAnimationEnd }) {
   useFrame((_, delta) => {
     if (animating && controls.current && targetRef.current) {
       const radius = camera.position.length();
-      const targetVec = latLonToVec3(
-        targetRef.current.lat,
-        targetRef.current.lon,
-        0
-      );
-      const t = 0.035; // animation speed
+      const targetVec = latLonToVec3(targetRef.current.lat, targetRef.current.lon, 0);
+      const t = 0.035;
       controls.current.target.lerp(targetVec, t);
 
       const desiredPhi = ((90 - targetRef.current.lat) * Math.PI) / 180;
@@ -203,7 +244,7 @@ function AnimatedOrbitControls({ targetLatLon, animate, onAnimationEnd }) {
         controls.current.target.copy(targetVec);
         camera.position.copy(desiredPosition);
         setAnimating(false);
-        if (onAnimationEnd) onAnimationEnd();
+        onAnimationEnd?.();
       }
     }
   });
@@ -220,15 +261,13 @@ function AnimatedOrbitControls({ targetLatLon, animate, onAnimationEnd }) {
     if (controls.current && !animating) {
       const dist = camera.position.length();
       controls.current.rotateSpeed = Math.max(0.05, dist * 0.13);
-      controls.current.zoomSpeed = Math.min(
-        1.2,
-        Math.max(0.7, 0.3 + dist * 0.12)
-      );
+      controls.current.zoomSpeed = Math.min(1.2, Math.max(0.7, 0.3 + dist * 0.12));
     }
   });
 
   return <OrbitControls ref={controls} />;
 }
+
 
 // ---- SearchBar ----
 export function SearchBar({ geoData, onSelect, loading }) {
